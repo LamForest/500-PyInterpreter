@@ -10,30 +10,38 @@ from utils import *
 import logging
 
 
-
+#Frame is FrameObject
 class Frame:
     def __init__(self, cobj: CodeType) -> None:
-        self.locals = {}
-        self.stack = []
-        self.return_flag = False
+        """
+        cobj: CodeObject
+        """
+        self.locals = [None] * cobj.co_nlocals #local 变量
+        self.stack = [] #计算栈
+        self.return_flag = False #跳出循环的flag，遇到RETURN_VALUE时设为True
         self.cobj = cobj
+        self.PC = 0
 
     def exec(self):
         stack = self.stack
         locals = self.locals
         cobj = self.cobj
+        
 
         inspect_code_object(cobj, print_dis=True)
 
-        instrustions = dis.get_instructions(cobj)
+        instructions = list(dis.get_instructions(cobj))
 
-        for instruction in instrustions:
-            self.instruction = instruction
-            instruction_handler = "_impl_" + instruction.opname
-            if hasattr(self, instruction_handler):
-                getattr(self, instruction_handler)()
+        while True:
+
+            self.instruction = instructions[self.PC]
+            self.PC += 1
+
+            instruction_impl = "_impl_" + self.instruction.opname
+            if hasattr(self, instruction_impl):
+                getattr(self, instruction_impl)()
             else:
-                logging.warning("Unknown instruction: {}".format(instruction))
+                logging.warning("Unknown instruction: {}".format(self.instruction ))
 
             if self.return_flag:
                 break
@@ -54,31 +62,35 @@ class Frame:
             case _:
                 logging.warning("Unknown binary op : {}", op_kind)
         
-        logging.debug("BINARY_OP : {}, result = {}".format(op_kind, stack[-1]))
+        logging.debug("BINARY_OP {}, result = {}".format(op_kind, stack[-1]))
 
     def _impl_LOAD_CONST(self):
         index = self.instruction.arg
         argval = self.cobj.co_consts[index]
-        logging.debug("LOAD_CONST : {}".format(argval))
         self.stack.append(argval)
 
-    def _impl_LOAD_NAME(self):
-        index = self.instruction.arg
-        name = self.cobj.co_names[index]
-        self.stack.append(self.locals[name])
+        logging.debug(f"LOAD_CONST ({index}): {argval}")
 
-    def _impl_STORE_NAME(self):
-        assert (len(self.stack >= 1))
+    def _impl_LOAD_FAST(self):
         index = self.instruction.arg
-        name = self.cobj.co_names[index]
-        self.locals[name] = self.stack.pop()
+        self.stack.append(self.locals[index])
 
-    """
-        不清楚实现的指令
-    """
+        #for debug
+        name = self.cobj.co_varnames[index]
+        logging.debug(f"LOAD_FAST {index} ({name})")
+
+
+    def _impl_STORE_FAST(self):
+        assert (len(self.stack) >= 1)
+        index = self.instruction.arg
+        self.locals[index] = self.stack.pop()
+
+        #for debug
+        name = self.cobj.co_varnames[index]
+        logging.debug(f"STORE_FAST {index} ({name})")
+
 
     def _impl_RETURN_VALUE(self):
-        print("RETURN_VALUE, 还不知道怎么实现，如何在C语言中返回多个？返回一个tuple? 上一级的frame_obj如何接受，存在哪里？")
         self.return_value = self.stack.pop()
         self.return_flag = True
 
@@ -90,6 +102,12 @@ class Frame:
         logging.debug("RESUME, do not care")
 
 
+
+def add():
+    a = 1
+    b = a + 1
+    c = a + b + 100
+
 class TestAdd(unittest.TestCase):
 
     def setUp(self) -> None:
@@ -98,12 +116,16 @@ class TestAdd(unittest.TestCase):
 
     def test_add(self):
         # source_code = "a = 1; b = 2; c = a + b"
-        source_code = "a = 1; b = a + 1; c = a + b + 100"
-        cobj = compile(source_code, "<file>", "exec")
+
+        cobj = add.__code__
 
         frame = Frame(cobj)
         frame.exec()
 
-        self.assertEqual(frame.locals["a"], 1)
-        self.assertEqual(frame.locals["b"], 2)
-        self.assertEqual(frame.locals["c"], 103)
+        self.assertEqual(frame.locals[0], 1)
+        self.assertEqual(frame.locals[1], 2)
+        self.assertEqual(frame.locals[2], 103)
+
+if __name__ == "__main__":
+    a = TestAdd()
+    a.test_add()
